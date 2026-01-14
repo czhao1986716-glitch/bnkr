@@ -4,15 +4,17 @@ import datetime
 import os
 import time
 
+# 配置信息
 API_KEY = os.getenv('BASESCAN_API_KEY')
 TOKEN_ADDRESS = "0x22af33fe49fd1fa80c7149773dde5890d3c76f3b"
+# 关键修改：必须使用 Etherscan V2 统一入口
 BASE_URL = "https://api.etherscan.io/v2/api"
 CSV_FILE = "bnkr_holders_history.csv"
 
 def get_balance(address):
-    """查询指定地址的代币余额 (免费接口)"""
+    """使用免费版支持的 V2 接口获取单个地址余额"""
     params = {
-        "chainid": "8453",
+        "chainid": "8453",      # Base 链主网 ID
         "module": "account",
         "action": "tokenbalance",
         "contractaddress": TOKEN_ADDRESS,
@@ -21,43 +23,42 @@ def get_balance(address):
         "apikey": API_KEY
     }
     try:
-        res = requests.get(BASE_URL, params=params, timeout=10).json()
-        if res['status'] == '1':
-            return float(res['result']) / 10**18
+        response = requests.get(BASE_URL, params=params, timeout=20)
+        data = response.json()
+        if data['status'] == '1':
+            return float(data['result']) / 10**18
         return 0
     except:
         return 0
 
 def main():
+    # 检查是否有初始数据
     if not os.path.exists(CSV_FILE):
-        print("请先手动上传初始的 CSV 文件！")
+        print("未找到初始 CSV 文件，请确保已手动上传。")
         return
 
-    # 读取旧名单
-    df = pd.read_csv(CSV_FILE)
-    # 假设 CSV 里有 'Address' 或 'TokenHolderAddress' 这一列
-    address_col = 'TokenHolderAddress' if 'TokenHolderAddress' in df.columns else 'Address'
-    
-    addresses = df[address_col].unique().tolist()[:200] # 只取前200个
-    
-    results = []
-    bj_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime('%Y-%m-%d')
+    # 读取大户名单
+    df_history = pd.read_csv(CSV_FILE)
+    # 自动识别地址列名
+    addr_col = 'TokenHolderAddress' if 'TokenHolderAddress' in df_history.columns else 'Address'
+    addresses = df_history[addr_col].unique().tolist()[:200]
 
-    print(f"开始更新 {len(addresses)} 个大户的余额...")
-    
+    bj_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=8)).strftime('%Y-%m-%d %H:%M')
+    print(f"开始更新 {len(addresses)} 个大户余额...")
+
+    new_data = []
     for addr in addresses:
         balance = get_balance(addr)
-        results.append({"Address": addr, "Balance": balance, "Date": bj_time})
-        time.sleep(0.2) # 免费版限速 5次/秒
+        new_data.append({addr_col: addr, "Balance": balance, "Date": bj_time})
+        # 免费版 API 频率限制
+        time.sleep(0.25)
 
-    df_new = pd.DataFrame(results)
-    
-    # 进行简单对比（示例：对比上一次的数据）
-    # 这里你可以加入逻辑：如果 Balance 变为 0，标记为“清仓离场”
-    # 如果有新数据，可以追加到历史记录中
-    
-    df_new.to_csv(f"report_{bj_time}.csv", index=False)
-    print("今日余额变动报告已生成。")
+    # 保存今日快照
+    df_new = pd.DataFrame(new_data)
+    # 合并到总表
+    df_final = pd.concat([df_history, df_new], ignore_index=True)
+    df_final.to_csv(CSV_FILE, index=False, encoding='utf-8-sig')
+    print(f"✅ 更新成功：{bj_time}")
 
 if __name__ == "__main__":
     main()
