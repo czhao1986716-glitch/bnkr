@@ -2,14 +2,13 @@ name: BNKR Daily Monitor
 
 on:
   schedule:
-    # 每天北京时间凌晨 0 点运行 (UTC 时间为前一天的 16:00)
-    - cron: '0 16 * * *'
-  workflow_dispatch:      # 允许你在网页上点击 "Run workflow" 手动触发
+    - cron: '0 16 * * *' # 北京时间每天凌晨0点运行
+  workflow_dispatch:      # 允许手动触发
 
 jobs:
   run-monitor:
     runs-on: ubuntu-latest
-    # 核心权限配置：必须允许脚本写入你的仓库
+    # 显式声明写权限
     permissions:
       contents: write
       
@@ -27,24 +26,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests pandas
 
-      - name: Run Monitoring Script
+      - name: Run Script
         env:
-          # 调用你在 Settings -> Secrets 中存好的 API Key
           BASESCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
         run: python monitor.py
 
       - name: Commit and Push Changes
         run: |
-          # 配置 GitHub 机器人身份
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          
-          # 检查文件是否有变动
           git add bnkr_holders_history.csv
-          
-          # 只有在文件有变动时才提交，避免无意义的报错
+          # 只有在有变动时才提交，防止 exit code 128 错误
           if git diff --staged --quiet; then
-            echo "No changes in holder data, skipping commit."
+            echo "No changes to commit"
           else
             git commit -m "Auto-update: $(date +'%Y-%m-%d %H:%M')"
             git push
