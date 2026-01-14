@@ -20,14 +20,13 @@
 <body>
     <div class="container">
         <h1>$BNKR 持仓监控看板</h1>
-        <div id="updateTime" class="info">正在读取 500 个大户数据...</div>
+        <div id="updateTime" class="info">正在获取最新数据...</div>
         <table>
             <thead>
                 <tr>
-                    <th>排名</th>
+                    <th width="80">排名</th>
                     <th>持币地址</th>
                     <th style="text-align: right;">持仓数量 (BNKR)</th>
-                    <th>更新日期</th>
                 </tr>
             </thead>
             <tbody id="tableBody"></tbody>
@@ -35,64 +34,63 @@
     </div>
 
     <script>
-        // 增加随机数防止浏览器缓存 CSV 文件
         const csvUrl = 'bnkr_holders_history.csv?v=' + Date.now();
 
         async function loadData() {
             try {
                 const response = await fetch(csvUrl);
                 const csvText = await response.text();
-                const lines = csvText.split(/\r?\n/).filter(l => l.trim().length > 0);
+                // 处理换行符并过滤空行
+                const lines = csvText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
 
-                // 1. 获取表头行
+                // 1. 获取表头并清理引号
                 const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
                 
-                // 2. 精准匹配你的表头：HolderAddress 和 Balance
+                // 2. 动态定位列索引（解决数据对不上的问题）
                 const addrIdx = headers.findIndex(h => h === 'HolderAddress' || h === 'Address');
                 const balanceIdx = headers.findIndex(h => h === 'Balance' || h === 'Quantity');
                 const dateIdx = headers.findIndex(h => h.toLowerCase().includes('date'));
 
-                // 3. 解析所有数据
                 let allData = [];
+                // 从第 2 行开始解析
                 for (let i = 1; i < lines.length; i++) {
-                    const cols = lines[i].split(',').map(c => c.trim().replace(/"/g, ''));
-                    const addr = cols[addrIdx];
+                    // 使用正则处理 CSV 字段，防止字段内有逗号导致错位
+                    const cols = lines[i].match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || lines[i].split(',');
+                    const cleanCols = cols.map(c => c.trim().replace(/"/g, ''));
+                    
+                    const addr = cleanCols[addrIdx];
                     if (addr && addr.startsWith('0x')) {
                         allData.push({
                             address: addr,
-                            balance: parseFloat(cols[balanceIdx]) || 0,
-                            date: (dateIdx !== -1 && cols[dateIdx]) ? cols[dateIdx] : "初始名单"
+                            balance: parseFloat(cleanCols[balanceIdx]) || 0,
+                            date: (dateIdx !== -1 && cleanCols[dateIdx]) ? cleanCols[dateIdx] : "初始名单"
                         });
                     }
                 }
 
-                // 4. 排序：如果有新日期，排在前面；如果没有，按金额排
+                // 3. 排序逻辑：优先按日期新旧，同日期按金额大小
                 allData.sort((a, b) => {
-                    // 如果日期不同，按日期排（处理新抓取的数据）
                     if (a.date !== b.date) return new Date(b.date) - new Date(a.date);
-                    // 同一日期按金额排
                     return b.balance - a.balance;
                 });
 
-                // 找到最新的日期用于顶部显示
-                const latestDate = allData.length > 0 ? allData[0].date : "无数据";
-                document.getElementById('updateTime').innerText = `当前显示：前 200 名持仓 (最后更新日期: ${latestDate})`;
+                // 4. 更新上方的时间显示（取最新一条数据的时间）
+                const latestUpdate = allData.length > 0 ? allData[0].date : "未知时间";
+                document.getElementById('updateTime').innerText = `最后自动更新时间：${latestUpdate} (北京时间)`;
 
                 const tbody = document.getElementById('tableBody');
                 tbody.innerHTML = '';
                 
-                // 只显示前 200 名（包括你初始上传的那些）
+                // 5. 渲染表格，只取前 200 名，不再显示最后一列日期
                 const displayData = allData.slice(0, 200);
-
                 displayData.forEach((row, index) => {
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td><span class="tag">${index + 1}</span></td>
                         <td><a class="address" href="https://basescan.org/address/${row.address}" target="_blank">
-                            ${row.address.substring(0,10)}...${row.address.substring(38)}
+                            ${row.address.substring(0,12)}...${row.address.substring(36)}
                         </a></td>
-                        <td class="balance">${row.balance.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                        <td style="color:#999; font-size:12px;">${row.date}</td>
+                        <td class="balance">${row.balance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                     `;
                     tbody.appendChild(tr);
                 });
