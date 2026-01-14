@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>$BNKR 大户持仓监控</title>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.0/papaparse.min.js"></script>
+    <style>
+        body { font-family: -apple-system, system-ui, sans-serif; background: #f4f7f9; color: #333; margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { color: #0052ff; text-align: center; font-size: 24px; }
+        .info { text-align: center; color: #666; margin-bottom: 20px; font-size: 14px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 14px; }
+        th { background: #f8f9fa; color: #666; position: sticky; top: 0; }
+        tr:hover { background: #f1f4ff; }
+        .address { font-family: monospace; color: #0052ff; text-decoration: none; }
+        .balance { font-weight: bold; text-align: right; }
+        .date { color: #999; font-size: 12px; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; background: #eef2ff; color: #4338ca; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>$BNKR 持仓监控看板</h1>
+        <div id="updateTime" class="info">正在加载最新数据...</div>
+        <table id="holderTable">
+            <thead>
+                <tr>
+                    <th>排名</th>
+                    <th>持币地址</th>
+                    <th style="text-align: right;">当前余额 (BNKR)</th>
+                    <th>最后更新</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+        </table>
+    </div>
+
+    <script>
+        const csvUrl = 'bnkr_holders_history.csv';
+
+        Papa.parse(csvUrl, {
+            download: true,
+            header: true,
+            complete: function(results) {
+                const data = results.data.filter(row => row.Balance); // 过滤空行
+                
+                // 按日期排序，确保拿到的是最新的
+                data.sort((a, b) => new Date(b.Date) - new Date(a.Date));
+                
+                const latestDate = data[0].Date;
+                document.getElementById('updateTime').innerText = `数据最后自动更新时间：${latestDate} (北京时间)`;
+
+                // 只展示最新一次更新的前 200 名，并按余额排序
+                const latestData = data.filter(row => row.Date === latestDate)
+                                       .sort((a, b) => parseFloat(b.Balance) - parseFloat(a.Balance));
+
+                const tbody = document.getElementById('tableBody');
+                latestData.forEach((row, index) => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td><span class="tag">${index + 1}</span></td>
+                        <td><a class="address" href="https://basescan.org/address/${row.TokenHolderAddress || row.Address}" target="_blank">
+                            ${(row.TokenHolderAddress || row.Address).substring(0, 10)}...${(row.TokenHolderAddress || row.Address).substring(38)}
+                        </a></td>
+                        <td class="balance">${parseFloat(row.Balance).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                        <td class="date">${row.Date}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+        });
+    </script>
+</body>
+</html>
