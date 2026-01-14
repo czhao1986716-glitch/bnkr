@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>$BNKR 大户持仓监控</title>
-    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.0/papaparse.min.js"></script>
     <style>
         body { font-family: -apple-system, system-ui, sans-serif; background: #f4f7f9; color: #333; margin: 0; padding: 20px; }
         .container { max-width: 900px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
@@ -13,18 +12,16 @@
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 14px; }
         th { background: #f8f9fa; color: #666; position: sticky; top: 0; }
-        tr:hover { background: #f1f4ff; }
         .address { font-family: monospace; color: #0052ff; text-decoration: none; }
         .balance { font-weight: bold; text-align: right; }
-        .date { color: #999; font-size: 12px; }
         .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; background: #eef2ff; color: #4338ca; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>$BNKR 持仓监控看板</h1>
-        <div id="updateTime" class="info">正在加载最新数据...</div>
-        <table id="holderTable">
+        <div id="updateTime" class="info">正在获取数据并解析，请稍候...</div>
+        <table>
             <thead>
                 <tr>
                     <th>排名</th>
@@ -38,39 +35,58 @@
     </div>
 
     <script>
+        // 使用你的 raw 链接确保跨域成功
         const csvUrl = 'https://raw.githubusercontent.com/czhao1986716-glitch/bnkr/main/bnkr_holders_history.csv';
 
-        Papa.parse(csvUrl, {
-            download: true,
-            header: true,
-            complete: function(results) {
-                const data = results.data.filter(row => row.Balance); // 过滤空行
+        async function loadData() {
+            try {
+                const response = await fetch(csvUrl);
+                const csvText = await response.text();
                 
-                // 按日期排序，确保拿到的是最新的
-                data.sort((a, b) => new Date(b.Date) - new Date(a.Date));
+                // 使用原生的字符串切割，避开第三方库的 eval 风险
+                const rows = csvText.split('\n').filter(line => line.trim() !== '');
+                const headers = rows[0].split(',');
                 
-                const latestDate = data[0].Date;
-                document.getElementById('updateTime').innerText = `数据最后自动更新时间：${latestDate} (北京时间)`;
+                // 查找列索引
+                const addrIdx = headers.findIndex(h => h.includes('Address'));
+                const balanceIdx = headers.findIndex(h => h.includes('Balance'));
+                const dateIdx = headers.findIndex(h => h.includes('Date'));
 
-                // 只展示最新一次更新的前 200 名，并按余额排序
-                const latestData = data.filter(row => row.Date === latestDate)
-                                       .sort((a, b) => parseFloat(b.Balance) - parseFloat(a.Balance));
+                let data = rows.slice(1).map(row => {
+                    const cols = row.split(',');
+                    return {
+                        address: cols[addrIdx],
+                        balance: parseFloat(cols[balanceIdx]),
+                        date: cols[dateIdx]
+                    };
+                });
 
+                // 按日期和余额排序
+                data.sort((a, b) => new Date(b.date) - new Date(a.date) || b.balance - a.balance);
+                
+                const latestDate = data[0].date;
+                document.getElementById('updateTime').innerText = `数据最后自动更新时间：${latestDate}`;
+
+                // 展示最新一批的前 200 名
+                const latestData = data.filter(d => d.date === latestDate);
                 const tbody = document.getElementById('tableBody');
+                
                 latestData.forEach((row, index) => {
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td><span class="tag">${index + 1}</span></td>
-                        <td><a class="address" href="https://basescan.org/address/${row.TokenHolderAddress || row.Address}" target="_blank">
-                            ${(row.TokenHolderAddress || row.Address).substring(0, 10)}...${(row.TokenHolderAddress || row.Address).substring(38)}
-                        </a></td>
-                        <td class="balance">${parseFloat(row.Balance).toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                        <td class="date">${row.Date}</td>
+                        <td><a class="address" href="https://basescan.org/address/${row.address}" target="_blank">${row.address.substring(0,8)}...${row.address.substring(34)}</a></td>
+                        <td class="balance">${row.balance.toLocaleString()}</td>
+                        <td style="color:#999; font-size:12px;">${row.date}</td>
                     `;
                     tbody.appendChild(tr);
                 });
+            } catch (err) {
+                document.getElementById('updateTime').innerText = '数据加载失败，请检查网络或 CSV 文件路径。';
+                console.error(err);
             }
-        });
+        }
+        loadData();
     </script>
 </body>
 </html>
