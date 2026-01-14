@@ -20,7 +20,7 @@
 <body>
     <div class="container">
         <h1>$BNKR 持仓监控看板</h1>
-        <div id="updateTime" class="info">数据加载中...</div>
+        <div id="updateTime" class="info">正在读取 500 个大户数据...</div>
         <table>
             <thead>
                 <tr>
@@ -35,8 +35,8 @@
     </div>
 
     <script>
-        // 强制刷新，防止浏览器读取旧缓存
-        const csvUrl = 'bnkr_holders_history.csv?v=' + Math.random();
+        // 增加随机数防止浏览器缓存 CSV 文件
+        const csvUrl = 'bnkr_holders_history.csv?v=' + Date.now();
 
         async function loadData() {
             try {
@@ -44,45 +44,45 @@
                 const csvText = await response.text();
                 const lines = csvText.split(/\r?\n/).filter(l => l.trim().length > 0);
 
-                // 1. 寻找标题行（找包含 Address 的那一行）
-                let headerIndex = lines.findIndex(l => l.toLowerCase().includes('address'));
-                if (headerIndex === -1) throw new Error("无法解析CSV：未找到地址列");
-
-                const headers = lines[headerIndex].split(',').map(h => h.trim().replace(/"/g, ''));
+                // 1. 获取表头行
+                const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
                 
-                // 2. 模糊匹配列索引
-                const addrIdx = headers.findIndex(h => /address|holder/i.test(h));
-                const balanceIdx = headers.findIndex(h => /balance|quantity/i.test(h));
-                const dateIdx = headers.findIndex(h => /date/i.test(h));
+                // 2. 精准匹配你的表头：HolderAddress 和 Balance
+                const addrIdx = headers.findIndex(h => h === 'HolderAddress' || h === 'Address');
+                const balanceIdx = headers.findIndex(h => h === 'Balance' || h === 'Quantity');
+                const dateIdx = headers.findIndex(h => h.toLowerCase().includes('date'));
 
                 // 3. 解析所有数据
                 let allData = [];
-                for (let i = headerIndex + 1; i < lines.length; i++) {
+                for (let i = 1; i < lines.length; i++) {
                     const cols = lines[i].split(',').map(c => c.trim().replace(/"/g, ''));
-                    if (cols[addrIdx] && cols[addrIdx].startsWith('0x')) {
+                    const addr = cols[addrIdx];
+                    if (addr && addr.startsWith('0x')) {
                         allData.push({
-                            address: cols[addrIdx],
+                            address: addr,
                             balance: parseFloat(cols[balanceIdx]) || 0,
-                            date: (dateIdx !== -1 && cols[dateIdx]) ? cols[dateIdx] : "初始数据"
+                            date: (dateIdx !== -1 && cols[dateIdx]) ? cols[dateIdx] : "初始名单"
                         });
                     }
                 }
 
-                // 4. 处理显示逻辑：展示最新的 200 条
-                // 排序：先按日期最新，再按金额最大
+                // 4. 排序：如果有新日期，排在前面；如果没有，按金额排
                 allData.sort((a, b) => {
+                    // 如果日期不同，按日期排（处理新抓取的数据）
                     if (a.date !== b.date) return new Date(b.date) - new Date(a.date);
+                    // 同一日期按金额排
                     return b.balance - a.balance;
                 });
 
-                const latestDate = allData[0].date;
-                document.getElementById('updateTime').innerText = `当前显示最新数据日期：${latestDate}`;
+                // 找到最新的日期用于顶部显示
+                const latestDate = allData.length > 0 ? allData[0].date : "无数据";
+                document.getElementById('updateTime').innerText = `当前显示：前 200 名持仓 (最后更新日期: ${latestDate})`;
 
                 const tbody = document.getElementById('tableBody');
                 tbody.innerHTML = '';
                 
-                // 只显示最新的这一批（比如最新的 200 个）
-                const displayData = allData.filter(d => d.date === latestDate).slice(0, 200);
+                // 只显示前 200 名（包括你初始上传的那些）
+                const displayData = allData.slice(0, 200);
 
                 displayData.forEach((row, index) => {
                     const tr = document.createElement('tr');
@@ -91,13 +91,13 @@
                         <td><a class="address" href="https://basescan.org/address/${row.address}" target="_blank">
                             ${row.address.substring(0,10)}...${row.address.substring(38)}
                         </a></td>
-                        <td class="balance">${row.balance.toLocaleString()}</td>
+                        <td class="balance">${row.balance.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
                         <td style="color:#999; font-size:12px;">${row.date}</td>
                     `;
                     tbody.appendChild(tr);
                 });
             } catch (err) {
-                document.getElementById('updateTime').innerText = '错误: ' + err.message;
+                document.getElementById('updateTime').innerText = '读取失败: ' + err.message;
             }
         }
         loadData();
