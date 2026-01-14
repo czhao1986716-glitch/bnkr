@@ -15,8 +15,8 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
         with:
-          # 使用系统自带的权限 Token
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # 必须显式开启，否则 Git 无法获得推送授权
+          persist-credentials: false 
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -33,15 +33,18 @@ jobs:
 
       - name: Commit and Push
         run: |
+          # 1. 配置临时身份
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
+          
+          # 2. 暂存变动
           git add bnkr_holders_history.csv
           
-          # 检查是否有变动
+          # 3. 检查是否有数据变动
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Auto-update: $(date)"
-            # 使用包含 Token 的地址进行推送，解决 128 错误
-            git push "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:${{ github.ref }}
+            git commit -m "Auto-update: $(date +'%Y-%m-%d %H:%M')"
+            # 4. 关键：直接在推送地址中注入临时访问令牌 (GITHUB_TOKEN)
+            git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:main
           fi
