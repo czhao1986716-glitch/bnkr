@@ -3,30 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>$BNKR 大户持仓监控</title>
+    <title>$BNKR 大户看板 (高级版)</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: -apple-system, system-ui, sans-serif; background: #f4f7f9; color: #333; margin: 0; padding: 20px; }
-        .container { max-width: 900px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        body { font-family: -apple-system, system-ui, sans-serif; background: #f0f2f5; margin: 0; padding: 15px; }
+        .container { max-width: 1100px; margin: auto; background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
         h1 { color: #0052ff; text-align: center; margin-bottom: 5px; }
-        .info { text-align: center; color: #666; margin-bottom: 20px; font-size: 14px; border-bottom: 1px solid #eee; padding-bottom: 15px; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 14px; }
-        th { background: #f8f9fa; color: #666; }
-        .address { font-family: monospace; color: #0052ff; text-decoration: none; }
-        .balance { font-weight: bold; text-align: right; color: #2c3e50; }
-        .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; background: #eef2ff; color: #4338ca; }
+        .info { text-align: center; color: #666; margin-bottom: 20px; font-size: 13px; }
+        table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        th { background: #f8f9fa; cursor: pointer; padding: 12px; font-size: 13px; color: #666; border-bottom: 2px solid #eee; }
+        th:hover { background: #eef2ff; }
+        td { padding: 12px; border-bottom: 1px solid #f0f0f0; font-size: 13px; word-break: break-all; }
+        .balance { font-weight: bold; text-align: right; }
+        .change-up { color: #00c087; font-weight: bold; }
+        .change-down { color: #ff3b30; font-weight: bold; }
+        .sold-out { background: #fff1f0; color: #cf1322; padding: 2px 5px; border-radius: 4px; font-size: 11px; }
+        .trend-canvas { width: 100px !important; height: 30px !important; }
+        .tag { background: #eef2ff; color: #4338ca; padding: 2px 6px; border-radius: 4px; font-size: 11px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>$BNKR 持仓监控看板</h1>
-        <div id="updateTime" class="info">正在获取北京时间最新数据...</div>
-        <table>
+        <h1>$BNKR 大户持仓监控</h1>
+        <div id="updateTime" class="info">加载中...</div>
+        <table id="mainTable">
             <thead>
                 <tr>
-                    <th width="80">排名</th>
-                    <th>持币地址</th>
-                    <th style="text-align: right;">持仓数量 (BNKR)</th>
+                    <th width="50">排名</th>
+                    <th width="120">持币地址</th>
+                    <th onclick="sortTable(2)" width="130" style="text-align: right;">余额 ▼</th>
+                    <th width="80" style="text-align: right;">占比</th>
+                    <th onclick="sortTable(4)" width="120" style="text-align: right;">24h变动</th>
+                    <th width="110">持仓趋势</th>
                 </tr>
             </thead>
             <tbody id="tableBody"></tbody>
@@ -34,88 +42,108 @@
     </div>
 
     <script>
+        const TOTAL_SUPPLY = 100000000000;
         const csvUrl = 'bnkr_holders_history.csv?v=' + Date.now();
+        let globalData = [];
 
-        // 核心：能够正确处理带引号和逗号的 CSV 行解析函数
         function parseCSVLine(text) {
-            const result = [];
-            let cur = '';
-            let inQuote = false;
+            const result = []; let cur = ''; let inQuote = false;
             for (let i = 0; i < text.length; i++) {
                 let char = text[i];
-                if (char === '"') {
-                    inQuote = !inQuote;
-                } else if (char === ',' && !inQuote) {
-                    result.push(cur.trim());
-                    cur = '';
-                } else {
-                    cur += char;
-                }
+                if (char === '"') inQuote = !inQuote;
+                else if (char === ',' && !inQuote) { result.push(cur.trim()); cur = ''; }
+                else cur += char;
             }
-            result.push(cur.trim());
-            return result;
+            result.push(cur.trim()); return result;
         }
 
         async function loadData() {
-            try {
-                const response = await fetch(csvUrl);
-                const csvText = await response.text();
-                const lines = csvText.split(/\r?\n/).filter(l => l.trim().length > 0);
+            const response = await fetch(csvUrl);
+            const csvText = await response.text();
+            const lines = csvText.split(/\r?\n/).filter(l => l.trim().length > 0);
+            const headers = parseCSVLine(lines[0]);
+            
+            const addrIdx = headers.findIndex(h => /Address|Holder/i.test(h));
+            const balIdx = headers.findIndex(h => /Balance|Quantity/i.test(h));
+            const changeIdx = headers.findIndex(h => /Change/i.test(h));
+            const dateIdx = headers.findIndex(h => /Date/i.test(h));
 
-                // 1. 解析标题行
-                const headers = parseCSVLine(lines[0]);
-                const addrIdx = headers.findIndex(h => h === 'HolderAddress' || h === 'Address');
-                const balanceIdx = headers.findIndex(h => h === 'Balance' || h === 'Quantity');
-                const dateIdx = headers.findIndex(h => h.toLowerCase().includes('date'));
-
-                let allData = [];
-                for (let i = 1; i < lines.length; i++) {
-                    const cols = parseCSVLine(lines[i]);
-                    const addr = cols[addrIdx];
-                    if (addr && addr.startsWith('0x')) {
-                        // 清理数量中的逗号，以便转换为数字
-                        let rawBalance = cols[balanceIdx] || "0";
-                        let cleanBalance = parseFloat(rawBalance.replace(/,/g, '')) || 0;
-                        
-                        allData.push({
-                            address: addr,
-                            balance: cleanBalance,
-                            date: (dateIdx !== -1 && cols[dateIdx]) ? cols[dateIdx] : "同步数据"
-                        });
-                    }
+            const rawData = [];
+            for (let i = 1; i < lines.length; i++) {
+                const cols = parseCSVLine(lines[i]);
+                if (cols[addrIdx]) {
+                    rawData.push({
+                        addr: cols[addrIdx],
+                        bal: parseFloat(cols[balIdx].replace(/,/g, '')) || 0,
+                        change: changeIdx !== -1 ? parseFloat(cols[changeIdx]) : 0,
+                        date: cols[dateIdx] || "初始"
+                    });
                 }
-
-                // 2. 排序：按金额从大到小
-                allData.sort((a, b) => b.balance - a.balance);
-
-                // 3. 更新上方时间（使用北京时间格式显示）
-                const now = new Date();
-                const bjTime = new Intl.DateTimeFormat('zh-CN', {
-                    year: 'numeric', month: '2-digit', day: '2-digit',
-                    hour: '2-digit', minute: '2-digit', second: '2-digit',
-                    timeZone: 'Asia/Shanghai'
-                }).format(now);
-                document.getElementById('updateTime').innerText = `最后页面刷新时间：${bjTime} (北京时间)`;
-
-                const tbody = document.getElementById('tableBody');
-                tbody.innerHTML = '';
-                
-                // 4. 渲染前 200 名
-                allData.slice(0, 200).forEach((row, index) => {
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td><span class="tag">${index + 1}</span></td>
-                        <td><a class="address" href="https://basescan.org/address/${row.address}" target="_blank">
-                            ${row.address.substring(0,12)}...${row.address.substring(36)}
-                        </a></td>
-                        <td class="balance">${row.balance.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-            } catch (err) {
-                document.getElementById('updateTime').innerText = '数据解析错误: ' + err.message;
             }
+
+            const latestDate = rawData[rawData.length-1].date;
+            document.getElementById('updateTime').innerText = `最后更新: ${latestDate} (北京时间) | 总量: 100B`;
+
+            // 聚合地址历史用于画图
+            const addrGroups = {};
+            rawData.forEach(r => {
+                if (!addrGroups[r.addr]) addrGroups[r.addr] = [];
+                addrGroups[r.addr].push(r.bal);
+            });
+
+            // 提取最新一帧
+            globalData = Object.keys(addrGroups).map(addr => {
+                const history = addrGroups[addr];
+                const currentBal = history[history.length - 1];
+                const lastBal = history.length > 1 ? history[history.length - 2] : currentBal;
+                return {
+                    addr,
+                    bal: currentBal,
+                    change: currentBal - lastBal,
+                    history: history.slice(-7), // 记录最近7次
+                    percent: (currentBal / TOTAL_SUPPLY * 100).toFixed(4) + '%'
+                };
+            }).sort((a,b) => b.bal - a.bal).slice(0, 200);
+
+            renderTable(globalData);
         }
+
+        function renderTable(data) {
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = '';
+            data.forEach((row, i) => {
+                const isSoldOut = row.bal < 1;
+                const changeClass = row.change > 0 ? 'change-up' : (row.change < 0 ? 'change-down' : '');
+                const changeText = row.change > 0 ? `+${row.change.toLocaleString()}` : (row.change < 0 ? row.change.toLocaleString() : '-');
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><span class="tag">${i+1}</span></td>
+                    <td><a style="text-decoration:none; color:#0052ff; font-family:monospace;" href="https://basescan.org/address/${row.addr}" target="_blank">${row.addr.substring(0,6)}...${row.addr.substring(36)}</a></td>
+                    <td class="balance">${isSoldOut ? '<span class="sold-out">已卖完</span>' : row.bal.toLocaleString()}</td>
+                    <td style="text-align:right;">${row.percent}</td>
+                    <td style="text-align:right;" class="${changeClass}">${changeText}</td>
+                    <td><canvas class="trend-canvas" id="chart-${i}"></canvas></td>
+                `;
+                tbody.appendChild(tr);
+                drawMiniChart(`chart-${i}`, row.history);
+            });
+        }
+
+        function drawMiniChart(id, data) {
+            new Chart(document.getElementById(id), {
+                type: 'line',
+                data: { labels: data, datasets: [{ data: data, borderColor: '#0052ff', borderWidth: 1.5, pointRadius: 0, fill: false }]},
+                options: { events: [], scales: { x: { display: false }, y: { display: false } }, plugins: { legend: { display: false } } }
+            });
+        }
+
+        function sortTable(type) {
+            if (type === 2) globalData.sort((a,b) => b.bal - a.bal);
+            if (type === 4) globalData.sort((a,b) => Math.abs(b.change) - Math.abs(a.change));
+            renderTable(globalData);
+        }
+
         loadData();
     </script>
 </body>
