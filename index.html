@@ -20,14 +20,14 @@
 <body>
     <div class="container">
         <h1>$BNKR 持仓监控看板</h1>
-        <div id="updateTime" class="info">正在分析数据结构...</div>
+        <div id="updateTime" class="info">数据加载中...</div>
         <table>
             <thead>
                 <tr>
                     <th>排名</th>
                     <th>持币地址</th>
-                    <th style="text-align: right;">当前余额 (BNKR)</th>
-                    <th>最后更新</th>
+                    <th style="text-align: right;">持仓数量 (BNKR)</th>
+                    <th>更新日期</th>
                 </tr>
             </thead>
             <tbody id="tableBody"></tbody>
@@ -35,72 +35,69 @@
     </div>
 
     <script>
-        const csvUrl = 'bnkr_holders_history.csv?t=' + new Date().getTime(); // 加上随机数防止缓存
+        // 强制刷新，防止浏览器读取旧缓存
+        const csvUrl = 'bnkr_holders_history.csv?v=' + Math.random();
 
         async function loadData() {
             try {
                 const response = await fetch(csvUrl);
                 const csvText = await response.text();
-                
-                // 1. 找到真正的标题行（跳过 BaseScan 可能存在的说明行）
                 const lines = csvText.split(/\r?\n/).filter(l => l.trim().length > 0);
-                let headerIndex = lines.findIndex(l => l.toLowerCase().includes('address') && l.toLowerCase().includes('balance'));
-                
-                if (headerIndex === -1) {
-                    // 如果没找到 Balance，尝试找 Quantity (BaseScan 原始格式)
-                    headerIndex = lines.findIndex(l => l.toLowerCase().includes('address') && l.toLowerCase().includes('quantity'));
-                }
 
-                if (headerIndex === -1) throw new Error("无法识别 CSV 格式");
+                // 1. 寻找标题行（找包含 Address 的那一行）
+                let headerIndex = lines.findIndex(l => l.toLowerCase().includes('address'));
+                if (headerIndex === -1) throw new Error("无法解析CSV：未找到地址列");
 
                 const headers = lines[headerIndex].split(',').map(h => h.trim().replace(/"/g, ''));
                 
-                // 2. 定位关键列
-                const addrIdx = headers.findIndex(h => /address/i.test(h));
+                // 2. 模糊匹配列索引
+                const addrIdx = headers.findIndex(h => /address|holder/i.test(h));
                 const balanceIdx = headers.findIndex(h => /balance|quantity/i.test(h));
                 const dateIdx = headers.findIndex(h => /date/i.test(h));
 
-                // 3. 解析数据
-                let data = [];
+                // 3. 解析所有数据
+                let allData = [];
                 for (let i = headerIndex + 1; i < lines.length; i++) {
                     const cols = lines[i].split(',').map(c => c.trim().replace(/"/g, ''));
-                    if (cols[addrIdx]) {
-                        data.push({
+                    if (cols[addrIdx] && cols[addrIdx].startsWith('0x')) {
+                        allData.push({
                             address: cols[addrIdx],
                             balance: parseFloat(cols[balanceIdx]) || 0,
-                            date: dateIdx !== -1 ? cols[dateIdx] : "初始导入"
+                            date: (dateIdx !== -1 && cols[dateIdx]) ? cols[dateIdx] : "初始数据"
                         });
                     }
                 }
 
-                // 4. 排序并展示最新数据
-                // 先按日期排，拿到最新的日期
-                const dates = [...new Set(data.map(d => d.date))].sort((a,b) => new Date(b) - new Date(a));
-                const latestDate = dates[0];
-                
-                const latestData = data.filter(d => d.date === latestDate)
-                                       .sort((a,b) => b.balance - a.balance)
-                                       .slice(0, 200);
+                // 4. 处理显示逻辑：展示最新的 200 条
+                // 排序：先按日期最新，再按金额最大
+                allData.sort((a, b) => {
+                    if (a.date !== b.date) return new Date(b.date) - new Date(a.date);
+                    return b.balance - a.balance;
+                });
 
-                document.getElementById('updateTime').innerText = `最后同步时间：${latestDate}`;
+                const latestDate = allData[0].date;
+                document.getElementById('updateTime').innerText = `当前显示最新数据日期：${latestDate}`;
 
                 const tbody = document.getElementById('tableBody');
-                tbody.innerHTML = ''; // 清空加载中
+                tbody.innerHTML = '';
                 
-                latestData.forEach((row, index) => {
+                // 只显示最新的这一批（比如最新的 200 个）
+                const displayData = allData.filter(d => d.date === latestDate).slice(0, 200);
+
+                displayData.forEach((row, index) => {
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td><span class="tag">${index + 1}</span></td>
                         <td><a class="address" href="https://basescan.org/address/${row.address}" target="_blank">
                             ${row.address.substring(0,10)}...${row.address.substring(38)}
                         </a></td>
-                        <td class="balance">${row.balance.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                        <td class="balance">${row.balance.toLocaleString()}</td>
                         <td style="color:#999; font-size:12px;">${row.date}</td>
                     `;
                     tbody.appendChild(tr);
                 });
             } catch (err) {
-                document.getElementById('updateTime').innerText = '数据解析错误: ' + err.message;
+                document.getElementById('updateTime').innerText = '错误: ' + err.message;
             }
         }
         loadData();
