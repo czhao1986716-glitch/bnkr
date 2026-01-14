@@ -2,19 +2,20 @@ name: BNKR Daily Monitor
 
 on:
   schedule:
-    - cron: '0 16 * * *' # 北京时间每天凌晨0点运行
-  workflow_dispatch:      # 允许手动触发
+    - cron: '0 16 * * *'
+  workflow_dispatch:
 
 jobs:
   run-monitor:
     runs-on: ubuntu-latest
-    # 显式声明写权限
     permissions:
       contents: write
       
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
+        with:
+          persist-credentials: true # 允许使用当前 Token 进行推送
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -22,24 +23,26 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests pandas
+        run: pip install requests pandas
 
       - name: Run Script
         env:
           BASESCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
         run: python monitor.py
 
-      - name: Commit and Push Changes
+      - name: Commit changes
         run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
           git add bnkr_holders_history.csv
-          # 只有在有变动时才提交，防止 exit code 128 错误
           if git diff --staged --quiet; then
-            echo "No changes to commit"
+            echo "No changes"
           else
-            git commit -m "Auto-update: $(date +'%Y-%m-%d %H:%M')"
-            git push
+            git commit -m "Auto-update: $(date)"
           fi
+
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref }}
