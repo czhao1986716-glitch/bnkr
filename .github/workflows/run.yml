@@ -15,7 +15,8 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
         with:
-          persist-credentials: true # 允许使用当前 Token 进行推送
+          # 使用系统自带的权限 Token
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -30,19 +31,17 @@ jobs:
           BASESCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
         run: python monitor.py
 
-      - name: Commit changes
+      - name: Commit and Push
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add bnkr_holders_history.csv
+          
+          # 检查是否有变动
           if git diff --staged --quiet; then
-            echo "No changes"
+            echo "No changes to commit"
           else
             git commit -m "Auto-update: $(date)"
+            # 使用包含 Token 的地址进行推送，解决 128 错误
+            git push "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" HEAD:${{ github.ref }}
           fi
-
-      - name: Push changes
-        uses: ad-m/github-push-action@master
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          branch: ${{ github.ref }}
